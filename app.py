@@ -37,6 +37,9 @@ st.markdown("""
 st.markdown('<div class="main-title">🐂 Conversor de Leilão de Gado</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Extraia automaticamente os lotes do PDF do leilão e lance direto na sua planilha do Google Drive</div>', unsafe_allow_html=True)
 
+URL_WEBHOOK_PADRAO = "https://script.google.com/macros/s/AKfycbxhV6UyshMf9pOmQvT3daJUFMpPpWSfFlGIDWT-v04zS7QKddtvxizQCjkB0-zEThwcaw/exec"
+ID_PLANILHA_PADRAO = "16I1RSk_WBZAk9bvU4kbKjrv9slWMqL1lFbbSFaEl5PU"
+
 # Barra lateral com métodos de integração
 with st.sidebar:
     st.header("⚙️ Conexão com a Planilha")
@@ -47,18 +50,20 @@ with st.sidebar:
         index=0
     )
 
-    webhook_url = ""
+    webhook_url = URL_WEBHOOK_PADRAO
     creds_source = None
-    spreadsheet_id = "1YN1TH_QlMCylMIvlKVM6mFt1NyQqfh-54JYbZS1S41A"
-    gid_input = "673667983"
+    spreadsheet_id = ID_PLANILHA_PADRAO
+    gid_input = "0"
 
     if metodo == "🔗 Webhook do Apps Script (Mais Fácil)":
-        st.markdown("**Como usar:** Cole a URL gerada pelo Apps Script da sua planilha:")
-        webhook_url = st.text_input(
+        st.markdown("**URL do Webhook conectada:**")
+        webhook_input = st.text_input(
             "URL do Webhook (Google Apps Script)",
-            placeholder="https://script.google.com/macros/s/.../exec",
+            value=URL_WEBHOOK_PADRAO,
             help="Cole a URL do App da Web gerada no menu Extensões > Apps Script da sua planilha"
         )
+        if webhook_input:
+            webhook_url = webhook_input
         with st.expander("❓ Como gerar essa URL em 1 minuto?"):
             st.markdown("""
             1. Abra sua planilha do Google.
@@ -155,7 +160,7 @@ if uploaded_pdf is not None:
                             try:
                                 res = gravar_via_webhook(webhook_url, dados_finais)
                                 st.success(f"🎉 Sucesso! {len(dados_finais)} lotes foram sobrepostos na sua planilha!")
-                                st.markdown(f"👉 [**Abrir Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
+                                st.markdown(f"👉 [**Clique aqui para abrir sua Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
                             except Exception as e:
                                 st.error(f"Erro ao enviar para o Webhook: {e}")
 
