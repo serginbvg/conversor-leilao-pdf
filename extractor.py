@@ -221,6 +221,15 @@ def extrair_lotes_de_tabela_page(page) -> List[Dict[str, Any]]:
                 for row in table[header_idx + 1:]:
                     if not row or not any(row):
                         continue
+
+                    # Ignora linhas de totalizadores (ex: 54 1684 Total Macho: 1684...) ou rodapés
+                    row_full_str = " ".join([str(c).upper() for c in row if c])
+                    if any(fim in row_full_str for fim in [
+                        "TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "TOTAL GERAL",
+                        "COMISSÃO", "COMISSAO", "CONDIÇÃO DE PAGTO", "CONDICAO DE PAGTO"
+                    ]):
+                        continue
+
                     lote_val = str(row[col_lote]).replace("\n", " ").strip() if col_lote < len(row) and row[col_lote] else ""
                     if not lote_val or any(fim in lote_val.upper() for fim in ["TOTAL", "COMISS", "CONDIC", "PAG."]):
                         continue
@@ -231,7 +240,7 @@ def extrair_lotes_de_tabela_page(page) -> List[Dict[str, Any]]:
                     desc_val = str(row[col_desc]).replace("\n", " ").strip() if col_desc != -1 and col_desc < len(row) and row[col_desc] else ""
                     obs_val = str(row[col_obs]).replace("\n", " ").strip() if col_obs != -1 and col_obs < len(row) and row[col_obs] else ""
 
-                    # Se lote válido
+                    # Se lote válido (numérico ou alfanumérico como 80A, 01, SN)
                     if re.match(r'^(?:[0-9]{1,4}[A-Za-z]?|SN)$', lote_val, re.IGNORECASE):
                         lote_formatado = formatar_lote_para_planilha(lote_val, qtde_val, vend_val, sx_val, desc_val, obs_val)
                         lotes.append(lote_formatado)
