@@ -2,13 +2,47 @@ import re
 from typing import List, Dict, Any, Optional
 import pdfplumber
 
+PLURAIS_CATEGORIAS = {
+    "BEZERRO": "BEZERROS",
+    "BEZERRA": "BEZERRAS",
+    "NOVILHA": "NOVILHAS",
+    "GARROTE": "GARROTES",
+    "BOI": "BOIS",
+    "VACA": "VACAS",
+    "TOURO": "TOUROS",
+    "VACA PARIDA": "VACAS PARIDAS",
+}
+
+SINGULARES_CATEGORIAS = {v: k for k, v in PLURAIS_CATEGORIAS.items()}
+
+def pluralizar_categoria(cat: str, qtde: int) -> str:
+    if not cat:
+        return ""
+    cat_limpa = cat.upper().replace("(S)", "").strip()
+    if qtde > 1:
+        return PLURAIS_CATEGORIAS.get(cat_limpa, cat_limpa if cat_limpa.endswith("S") else cat_limpa + "S")
+    else:
+        return SINGULARES_CATEGORIAS.get(cat_limpa, cat_limpa)
+
+def pluralizar_sexo(sexo: str, qtde: int) -> str:
+    if not sexo:
+        return ""
+    sexo_limpo = sexo.upper().strip()
+    if qtde > 1:
+        if sexo_limpo in ["MACHO", "MACHOS"]:
+            return "MACHOS"
+        elif sexo_limpo in ["FÊMEA", "FEMEA", "FÊMEAS", "FEMEAS"]:
+            return "FÊMEAS"
+    else:
+        if sexo_limpo in ["MACHO", "MACHOS"]:
+            return "MACHO"
+        elif sexo_limpo in ["FÊMEA", "FEMEA", "FÊMEAS", "FEMEAS"]:
+            return "FÊMEA"
+    return sexo_limpo
+
 def parse_descricao(descricao_raw: str, sx_raw: str = "") -> Dict[str, Any]:
     """
     Decompõe o texto de descrição do lote.
-    Exemplos:
-    - 'BEZERRA(S) NELORE DE 12 MS' -> categoria: 'BEZERRA', raca: 'NELORE', meses: 12
-    - 'GARROTE(S) CRUZ. INDUSTRIAL DE 16 MS' -> categoria: 'GARROTE', raca: 'CRUZ. INDUSTRIAL', meses: 16
-    - 'VACA(S) PARIDA(S) CRUZADA DE 48 MS' -> categoria: 'VACA PARIDA', raca: 'CRUZADO', meses: 48
     """
     if not descricao_raw:
         return {"categoria": "", "raca": "", "meses": ""}
@@ -106,14 +140,20 @@ def formatar_lote_para_planilha(
         sexo_extenso = sx_limpo
         sx_norm = sx_limpo
 
+    qtde_num = int(qtde) if str(qtde).strip().isdigit() else 1
+
     decomp = parse_descricao(descricao, sx_limpo)
-    categoria = decomp["categoria"] if decomp["categoria"] else ("MACHO" if sx_norm == "M" else "FÊMEA" if sx_norm == "F" else "")
+    categoria_base = decomp["categoria"] if decomp["categoria"] else ("MACHO" if sx_norm == "M" else "FÊMEA" if sx_norm == "F" else "")
+    
+    # Concordância gramatical automática: se > 1 vira plural (BEZERROS, BOIS, VACAS...)
+    categoria_ajustada = pluralizar_categoria(categoria_base, qtde_num)
 
     return {
         "LOTE": str(lote).strip(),
         "QUANTIDADE": int(qtde) if str(qtde).strip().isdigit() else str(qtde).strip(),
         "SEXO": sexo_extenso,
-        "CATEGORIA": categoria,
+        "CATEGORIA": categoria_ajustada,
+        "CATEGORIA_SINGULAR": categoria_base,
         "raca": decomp["raca"],
         "MESES": decomp["meses"],
         "KG": "",
@@ -126,21 +166,11 @@ def formatar_lote_para_planilha(
 def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     """
     Extrator multi-formato universal para leilões de gado.
-    Suporta:
-    - São Germano Leilões (SX = M / F, lotes numéricos ou SN)
-    - Boiadeiro Leilões (Sexo = MACHO / FÊMEA, lotes alfanuméricos como 80A, 01, 903)
-    - Quebras de linha e caracteres acentuados
     """
     linhas = text.split("\n")
     linhas_completas = []
     buffer_linha = ""
 
-    # Padrão flexível:
-    # Lote: 1 a 4 dígitos + letra opcional (ex: 80A, 01) ou SN
-    # Quantidade: 1 a 4 dígitos
-    # Vendedor: texto livre com acentos
-    # Sexo: MACHO, FÊMEA, FEMEA, M, ou F
-    # Descrição / resto
     inicio_lote_re = re.compile(
         r'^\s*([0-9]{1,4}[A-Za-z]?|SN)\s+(\d{1,4})\s+(.+?)\s+(MACHO|FÊMEA|FEMEA|[MF])(?:\s+(.*))?$',
         re.IGNORECASE
@@ -156,7 +186,6 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
         l_strip = l.strip()
         if not l_strip:
             continue
-        # Ignora cabeçalhos ou rodapés típicos
         if any(ign in l_strip.upper() for ign in palavras_ignorar):
             continue
 
@@ -194,16 +223,11 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     return lotes
 
 def extrair_lotes_de_pdf(pdf_path_or_file) -> List[Dict[str, Any]]:
-    """
-    Lê qualquer PDF de leilão via pdfplumber e extrai os lotes automaticamente.
-    """
     lotes_extraidos = []
-
     with pdfplumber.open(pdf_path_or_file) as pdf:
         for page in pdf.pages:
             text = page.extract_text(layout=False)
             if text:
                 lotes_pagina = extrair_lotes_de_texto(text)
                 lotes_extraidos.extend(lotes_pagina)
-
     return lotes_extraidos
