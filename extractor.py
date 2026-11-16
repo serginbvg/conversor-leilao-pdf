@@ -7,8 +7,8 @@ def parse_descricao(descricao_raw: str, sx_raw: str = "") -> Dict[str, Any]:
     Decompõe o texto de descrição do lote.
     Exemplos:
     - 'BEZERRA(S) NELORE DE 12 MS' -> categoria: 'BEZERRA', raca: 'NELORE', meses: 12
+    - 'GARROTE(S) CRUZ. INDUSTRIAL DE 16 MS' -> categoria: 'GARROTE', raca: 'CRUZ. INDUSTRIAL', meses: 16
     - 'VACA(S) PARIDA(S) CRUZADA DE 48 MS' -> categoria: 'VACA PARIDA', raca: 'CRUZADO', meses: 48
-    - 'GARROTE(S) ANELORADO DE 22 MS' -> categoria: 'GARROTE', raca: 'ANELORADO', meses: 22
     """
     if not descricao_raw:
         return {"categoria": "", "raca": "", "meses": ""}
@@ -24,7 +24,7 @@ def parse_descricao(descricao_raw: str, sx_raw: str = "") -> Dict[str, Any]:
     else:
         texto_sem_meses = texto
 
-    # 2. Categoria / Sexo
+    # 2. Categoria
     categoria = ""
     categorias_padrao = [
         (r'VACA\(S\)\s*PARIDA\(S\)|VACA\s+PARIDA', 'VACA PARIDA'),
@@ -44,12 +44,17 @@ def parse_descricao(descricao_raw: str, sx_raw: str = "") -> Dict[str, Any]:
             break
 
     if not categoria and sx_raw:
-        categoria = "FÊMEA" if sx_raw.upper().strip() == 'F' else "MACHO" if sx_raw.upper().strip() == 'M' else ""
+        sx_upper = sx_raw.upper().strip()
+        if sx_upper in ["F", "FEMEA", "FÊMEA"]:
+            categoria = "FÊMEA"
+        elif sx_upper in ["M", "MACHO"]:
+            categoria = "MACHO"
 
     # 3. Raça
     racas_padrao = [
         (r'\bNELORE\b', 'NELORE'),
         (r'\bANELORAD[OA]\(S\)?\b|\bANELORAD[OA]\b', 'ANELORADO'),
+        (r'\bCRUZ(?:\.|\s+)?INDUSTRIAL\b', 'CRUZ. INDUSTRIAL'),
         (r'\bCRUZAD[OA]\(S\)?\b|\bCRUZAD[OA]\b', 'CRUZADO'),
         (r'\bMESTIÇ[OA]\(S\)?\b|\bMESTIÇ[OA]\b|\bMESTICO\b', 'MESTIÇO'),
         (r'\bANGUS\b', 'ANGUS'),
@@ -93,6 +98,14 @@ def formatar_lote_para_planilha(
     decomp = parse_descricao(descricao, sx)
     campo_sexo = decomp["categoria"] if decomp["categoria"] else (descricao.strip() if descricao else sx)
 
+    sx_limpo = str(sx).strip().upper()
+    if sx_limpo.startswith("M"):
+        sx_norm = "M"
+    elif sx_limpo.startswith("F"):
+        sx_norm = "F"
+    else:
+        sx_norm = sx_limpo
+
     return {
         "LOTE": str(lote).strip(),
         "QUANTIDADE": int(qtde) if str(qtde).strip().isdigit() else str(qtde).strip(),
@@ -102,28 +115,45 @@ def formatar_lote_para_planilha(
         "KG": "",
         "LOCAL": str(vendedor).strip(),
         "observacao": str(obs).strip() if obs else "",
-        "SX_ORIGINAL": str(sx).strip().upper(),
+        "SX_ORIGINAL": sx_norm,
         "DESCRICAO_ORIGINAL": str(descricao).strip()
     }
 
 def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     """
-    Extrator inteligente com suporte a:
-    - Nomes com caracteres acentuados (ex: 'CABAÇA', 'SÃO JOÃO')
-    - Linhas de descrição que quebram em múltiplas linhas (ex: Lote 101)
+    Extrator multi-formato universal para leilões de gado.
+    Suporta:
+    - São Germano Leilões (SX = M / F, lotes numéricos ou SN)
+    - Boiadeiro Leilões (Sexo = MACHO / FÊMEA, lotes alfanuméricos como 80A, 01, 903)
+    - Quebras de linha e caracteres acentuados
     """
     linhas = text.split("\n")
     linhas_completas = []
     buffer_linha = ""
 
-    # Início de um lote: SN ou número (1 a 4 dígitos) + quantidade + vendedor + M/F
-    inicio_lote_re = re.compile(r'^\s*([0-9]{1,4}|SN)\s+(\d{1,4})\s+(.+?)\s+([MF])(?:\s+(.*))?$', re.IGNORECASE)
+    # Padrão flexível:
+    # Lote: 1 a 4 dígitos + letra opcional (ex: 80A, 01) ou SN
+    # Quantidade: 1 a 4 dígitos
+    # Vendedor: texto livre com acentos
+    # Sexo: MACHO, FÊMEA, FEMEA, M, ou F
+    # Descrição / resto
+    inicio_lote_re = re.compile(
+        r'^\s*([0-9]{1,4}[A-Za-z]?|SN)\s+(\d{1,4})\s+(.+?)\s+(MACHO|FÊMEA|FEMEA|[MF])(?:\s+(.*))?$',
+        re.IGNORECASE
+    )
+
+    palavras_ignorar = [
+        "RELAÇÃO DOS LOTES", "RELACAO DOS LOTES", "LOTE QTDE", "TOTAL MACHO",
+        "COMISSÃO", "COMISSAO", "PAG.:", "LEILAO DE GADO DE CORTE",
+        "TATERSAL", "TATHERSAL", "CONDICAO DE PAGTO", "CONDIÇÃO DE PAGTO"
+    ]
 
     for l in linhas:
         l_strip = l.strip()
         if not l_strip:
             continue
-        if any(ignorar in l_strip.upper() for ignorar in ["RELAÇÃO DOS LOTES", "LOTE QTDE", "TOTAL MACHO", "COMISSÃO", "RODOVIA", "TATHERSAL", "PAG.:"]):
+        # Ignora cabeçalhos ou rodapés típicos
+        if any(ign in l_strip.upper() for ign in palavras_ignorar):
             continue
 
         m = inicio_lote_re.match(l_strip)
@@ -145,7 +175,7 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
             lote = m.group(1).strip()
             qtde = m.group(2).strip()
             vendedor = m.group(3).strip()
-            sx = m.group(4).strip().upper()
+            sx = m.group(4).strip()
             resto = m.group(5).strip() if m.group(5) else ""
 
             obs = ""
@@ -161,7 +191,7 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
 
 def extrair_lotes_de_pdf(pdf_path_or_file) -> List[Dict[str, Any]]:
     """
-    Lê o PDF do leilão via pdfplumber e extrai todos os lotes com precisão de 100%.
+    Lê qualquer PDF de leilão via pdfplumber e extrai os lotes automaticamente.
     """
     lotes_extraidos = []
 

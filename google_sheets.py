@@ -11,31 +11,23 @@ SCOPES = [
 
 COLUNAS_PADRAO = ["LOTE", "QUANTIDADE", "SEXO", "raca", "MESES", "KG", "LOCAL", "observacao"]
 
-def preparar_linhas_matriz(lotes: List[Dict[str, Any]]) -> List[List[str]]:
+def preparar_linhas_matriz(lotes: List[Dict[str, Any]], colunas: Optional[List[str]] = None) -> List[List[str]]:
     """
-    Monta a matriz com o cabeçalho e todas as linhas formatadas.
+    Monta a matriz com as colunas selecionadas e todas as linhas formatadas.
     """
-    linhas = [COLUNAS_PADRAO]
+    cols = colunas if colunas else COLUNAS_PADRAO
+    linhas = [cols]
     for lote in lotes:
-        linha = [
-            str(lote.get("LOTE", "")),
-            str(lote.get("QUANTIDADE", "")),
-            str(lote.get("SEXO", "")),
-            str(lote.get("raca", "")),
-            str(lote.get("MESES", "")),
-            str(lote.get("KG", "")),
-            str(lote.get("LOCAL", "")),
-            str(lote.get("observacao", ""))
-        ]
+        linha = [str(lote.get(col, "")) for col in cols]
         linhas.append(linha)
     return linhas
 
-def gravar_via_webhook(webhook_url: str, lotes: List[Dict[str, Any]]) -> Dict[str, Any]:
+def gravar_via_webhook(webhook_url: str, lotes: List[Dict[str, Any]], colunas: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Grava os lotes na planilha enviando diretamente para o Webhook do Google Apps Script.
-    Não exige nenhuma conta de serviço ou arquivo JSON.
+    Suporta seleção dinâmica de colunas.
     """
-    linhas = preparar_linhas_matriz(lotes)
+    linhas = preparar_linhas_matriz(lotes, colunas)
     payload = {"linhas": linhas}
 
     headers = {"Content-Type": "application/json"}
@@ -70,7 +62,8 @@ def sobrepor_lotes_na_planilha(
     client: gspread.Client,
     spreadsheet_id: str,
     lotes: List[Dict[str, Any]],
-    gid: Optional[int] = None
+    gid: Optional[int] = None,
+    colunas: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Limpa a planilha existente e sobrepõe com os novos dados de lotes do leilão via gspread.
@@ -87,7 +80,7 @@ def sobrepor_lotes_na_planilha(
     if worksheet is None:
         worksheet = sh.get_worksheet(0)
 
-    linhas = preparar_linhas_matriz(lotes)
+    linhas = preparar_linhas_matriz(lotes, colunas)
 
     worksheet.clear()
     worksheet.update(values=linhas, range_name="A1")

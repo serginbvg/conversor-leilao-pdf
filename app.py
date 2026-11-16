@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">🐂 Conversor de Leilão de Gado</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Extraia automaticamente os lotes do PDF do leilão e lance direto na sua planilha do Google Drive</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Extraia automaticamente os lotes de múltiplos formatos de PDF e sincronize os campos desejados com sua planilha do Google Drive</div>', unsafe_allow_html=True)
 
 URL_WEBHOOK_PADRAO = "https://script.google.com/macros/s/AKfycbxhV6UyshMf9pOmQvT3daJUFMpPpWSfFlGIDWT-v04zS7QKddtvxizQCjkB0-zEThwcaw/exec"
 ID_PLANILHA_PADRAO = "16I1RSk_WBZAk9bvU4kbKjrv9slWMqL1lFbbSFaEl5PU"
@@ -68,7 +68,7 @@ with st.sidebar:
             st.markdown("""
             1. Abra sua planilha do Google.
             2. Vá em **Extensões** ➔ **Apps Script**.
-            3. Cole o código fornecido.
+            3. Cole o código do Webhook.
             4. Clique em **Implantar** ➔ **Nova implantação** ➔ Tipo: **App da Web**.
             5. Defina: Quem tem acesso = *Qualquer pessoa*.
             6. Copie a URL gerada e cole aqui!
@@ -77,11 +77,11 @@ with st.sidebar:
     else:
         spreadsheet_id = st.text_input(
             "ID da Planilha Google",
-            value="1YN1TH_QlMCylMIvlKVM6mFt1NyQqfh-54JYbZS1S41A"
+            value=ID_PLANILHA_PADRAO
         )
         gid_input = st.text_input(
             "GID da Aba (opcional)",
-            value="673667983"
+            value="0"
         )
         if "gcp_service_account" in st.secrets:
             creds_source = dict(st.secrets["gcp_service_account"])
@@ -103,7 +103,7 @@ with st.sidebar:
 uploaded_pdf = st.file_uploader(
     "📄 Selecione ou arraste o PDF do Leilão:",
     type=["pdf"],
-    help="Envie o arquivo PDF com a relação dos lotes"
+    help="Envie o arquivo PDF com a relação dos lotes (São Germano, Boiadeiro, etc.)"
 )
 
 if uploaded_pdf is not None:
@@ -130,79 +130,93 @@ if uploaded_pdf is not None:
         col3.metric("♂️ Machos", f"{total_machos}")
         col4.metric("♀️ Fêmeas", f"{total_femeas}")
 
-        st.markdown("### 📋 Conferência dos Lotes Extraídos")
-        st.caption("Você pode conferir os dados ou fazer correções manuais na tabela abaixo antes de enviar para a planilha.")
+        st.markdown("---")
+        st.markdown("### 🎯 Seleção de Campos para Envio")
+        st.caption("Escolha quais colunas você quer enviar para a sua planilha do Google. Desmarque as colunas que não desejar incluir:")
 
-        colunas_exibicao = ["LOTE", "QUANTIDADE", "SEXO", "raca", "MESES", "KG", "LOCAL", "observacao"]
-        df_exibicao = df_lotes[colunas_exibicao]
-
-        df_editado = st.data_editor(
-            df_exibicao,
-            use_container_width=True,
-            num_rows="dynamic",
-            key="editor_lotes"
+        colunas_selecionadas = st.multiselect(
+            "Campos selecionados:",
+            options=COLUNAS_PADRAO,
+            default=COLUNAS_PADRAO,
+            help="Arraste ou desmarque para personalizar a ordem ou remover colunas."
         )
 
-        st.markdown("---")
+        if not colunas_selecionadas:
+            st.warning("⚠️ Selecione pelo menos 1 coluna para visualizar e gravar na planilha.")
+        else:
+            st.markdown("### 📋 Conferência dos Lotes a Enviar")
+            st.caption("Você pode alterar qualquer informação diretamente na tabela antes de enviar:")
 
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+            df_exibicao = df_lotes[colunas_selecionadas]
 
-        with col_btn1:
-            if st.button("🚀 Gravar e Sobrepor na Planilha Google", type="primary", use_container_width=True):
-                dados_finais = df_editado.to_dict(orient="records")
-                
-                # Opção 1: Webhook (Sem JSON e sem Google Cloud)
-                if metodo.startswith("🔗"):
-                    if not webhook_url:
-                        st.error("⚠️ Cole a URL do Webhook na barra lateral à esquerda.")
-                    else:
-                        with st.spinner("Enviando dados diretamente para a planilha via Webhook..."):
-                            try:
-                                res = gravar_via_webhook(webhook_url, dados_finais)
-                                st.success(f"🎉 Sucesso! {len(dados_finais)} lotes foram sobrepostos na sua planilha!")
-                                st.markdown(f"👉 [**Clique aqui para abrir sua Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
-                            except Exception as e:
-                                st.error(f"Erro ao enviar para o Webhook: {e}")
-
-                # Opção 2: Conta de Serviço
-                else:
-                    if not creds_source:
-                        st.error("⚠️ Carregue o arquivo de credenciais na barra lateral.")
-                    else:
-                        with st.spinner("Conectando ao Google Sheets e atualizando dados..."):
-                            try:
-                                cliente = obter_cliente_gspread(creds_source)
-                                gid_val = int(gid_input.strip()) if gid_input.strip().isdigit() else None
-                                resultado = sobrepor_lotes_na_planilha(cliente, spreadsheet_id.strip(), dados_finais, gid=gid_val)
-                                st.success(f"🎉 Sucesso! {resultado['total_linhas']} lotes foram sobrepostos na aba '{resultado['aba']}' da sua planilha!")
-                                link_planilha = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id.strip()}/edit"
-                                if gid_val:
-                                    link_planilha += f"#gid={gid_val}"
-                                st.markdown(f"👉 [**Abrir Planilha Atualizada**]({link_planilha})")
-                            except Exception as e:
-                                st.error(f"Erro ao gravar na planilha: {e}")
-
-        with col_btn2:
-            buffer_excel = io.BytesIO()
-            with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
-                df_editado.to_excel(writer, index=False, sheet_name="Lotes")
-            st.download_button(
-                label="📥 Baixar Excel (.xlsx)",
-                data=buffer_excel.getvalue(),
-                file_name="lotes_leilao.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+            df_editado = st.data_editor(
+                df_exibicao,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="editor_lotes"
             )
 
-        with col_btn3:
-            buffer_csv = df_editado.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Baixar CSV",
-                data=buffer_csv,
-                file_name="lotes_leilao.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+            st.markdown("---")
+
+            col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+
+            with col_btn1:
+                label_gravar = f"🚀 Gravar {len(df_editado)} Lotes na Planilha Google"
+                if st.button(label_gravar, type="primary", use_container_width=True):
+                    dados_finais = df_editado.to_dict(orient="records")
+                    
+                    # Opção 1: Webhook
+                    if metodo.startswith("🔗"):
+                        if not webhook_url:
+                            st.error("⚠️ Cole a URL do Webhook na barra lateral à esquerda.")
+                        else:
+                            with st.spinner("Enviando dados diretamente para a planilha via Webhook..."):
+                                try:
+                                    res = gravar_via_webhook(webhook_url, dados_finais, colunas=colunas_selecionadas)
+                                    st.success(f"🎉 Sucesso! {len(dados_finais)} lotes foram sobrepostos na sua planilha com as colunas: {', '.join(colunas_selecionadas)}!")
+                                    st.markdown(f"👉 [**Clique aqui para abrir sua Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
+                                except Exception as e:
+                                    st.error(f"Erro ao enviar para o Webhook: {e}")
+
+                    # Opção 2: Conta de Serviço
+                    else:
+                        if not creds_source:
+                            st.error("⚠️ Carregue o arquivo de credenciais na barra lateral.")
+                        else:
+                            with st.spinner("Conectando ao Google Sheets e atualizando dados..."):
+                                try:
+                                    cliente = obter_cliente_gspread(creds_source)
+                                    gid_val = int(gid_input.strip()) if gid_input.strip().isdigit() else None
+                                    resultado = sobrepor_lotes_na_planilha(cliente, spreadsheet_id.strip(), dados_finais, gid=gid_val, colunas=colunas_selecionadas)
+                                    st.success(f"🎉 Sucesso! {resultado['total_linhas']} lotes foram sobrepostos com as colunas: {', '.join(colunas_selecionadas)}!")
+                                    link_planilha = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id.strip()}/edit"
+                                    if gid_val:
+                                        link_planilha += f"#gid={gid_val}"
+                                    st.markdown(f"👉 [**Clique aqui para abrir sua Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
+                                except Exception as e:
+                                    st.error(f"Erro ao gravar na planilha: {e}")
+
+            with col_btn2:
+                buffer_excel = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
+                    df_editado.to_excel(writer, index=False, sheet_name="Lotes")
+                st.download_button(
+                    label="📥 Baixar Excel (.xlsx)",
+                    data=buffer_excel.getvalue(),
+                    file_name="lotes_leilao.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with col_btn3:
+                buffer_csv = df_editado.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📥 Baixar CSV",
+                    data=buffer_csv,
+                    file_name="lotes_leilao.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
 
     else:
         st.warning("Nenhum lote foi encontrado no PDF. Verifique se o arquivo possui a relação de lotes.")
