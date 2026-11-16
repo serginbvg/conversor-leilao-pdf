@@ -130,28 +130,35 @@ def formatar_lote_para_planilha(
     obs: str = ""
 ) -> Dict[str, Any]:
     sx_limpo = str(sx).strip().upper()
-    if sx_limpo in ["M", "MACHO"]:
-        sexo_extenso = "MACHO"
+    if sx_limpo in ["M", "MACHO", "MACHOS"]:
+        sexo_base = "MACHO"
         sx_norm = "M"
-    elif sx_limpo in ["F", "FEMEA", "FÊMEA"]:
-        sexo_extenso = "FÊMEA"
+    elif sx_limpo in ["F", "FEMEA", "FÊMEA", "FEMEAS", "FÊMEAS"]:
+        sexo_base = "FÊMEA"
         sx_norm = "F"
     else:
-        sexo_extenso = sx_limpo
+        sexo_base = sx_limpo
         sx_norm = sx_limpo
 
     qtde_num = int(qtde) if str(qtde).strip().isdigit() else 1
 
+    # Concordância gramatical automática de sexo:
+    # Se quantidade > 1 -> MACHOS ou FÊMEAS
+    # Se quantidade == 1 -> MACHO ou FÊMEA
+    sexo_ajustado = pluralizar_sexo(sexo_base, qtde_num)
+
     decomp = parse_descricao(descricao, sx_limpo)
     categoria_base = decomp["categoria"] if decomp["categoria"] else ("MACHO" if sx_norm == "M" else "FÊMEA" if sx_norm == "F" else "")
     
-    # Concordância gramatical automática: se > 1 vira plural (BEZERROS, BOIS, VACAS...)
+    # Concordância gramatical automática de categoria:
+    # Se quantidade > 1 -> BEZERROS, BOIS, VACAS...
     categoria_ajustada = pluralizar_categoria(categoria_base, qtde_num)
 
     return {
         "LOTE": str(lote).strip(),
         "QUANTIDADE": int(qtde) if str(qtde).strip().isdigit() else str(qtde).strip(),
-        "SEXO": sexo_extenso,
+        "SEXO": sexo_ajustado,
+        "SEXO_SINGULAR": sexo_base,
         "CATEGORIA": categoria_ajustada,
         "CATEGORIA_SINGULAR": categoria_base,
         "raca": decomp["raca"],
@@ -177,8 +184,7 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     )
 
     palavras_ignorar = [
-        "RELAÇÃO DOS LOTES", "RELACAO DOS LOTES", "LOTE QTDE", "TOTAL MACHO",
-        "COMISSÃO", "COMISSAO", "PAG.:", "LEILAO DE GADO DE CORTE",
+        "RELAÇÃO DOS LOTES", "RELACAO DOS LOTES", "LOTE QTDE", "PAG.:", "LEILAO DE GADO DE CORTE",
         "TATERSAL", "TATHERSAL", "CONDICAO DE PAGTO", "CONDIÇÃO DE PAGTO"
     ]
 
@@ -186,6 +192,15 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
         l_strip = l.strip()
         if not l_strip:
             continue
+
+        # Se encontrou o totalizador da página ou rodapé final, encerra a leitura desta página
+        if any(fim in l_strip.upper() for fim in ["TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "COMISSÃO DE COMPRA", "COMISSAO DE COMPRA"]):
+            if buffer_linha:
+                linhas_completas.append(buffer_linha)
+                buffer_linha = ""
+            break
+
+        # Ignora cabeçalhos ou rodapés típicos
         if any(ign in l_strip.upper() for ign in palavras_ignorar):
             continue
 
@@ -196,7 +211,9 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
             buffer_linha = l_strip
         else:
             if buffer_linha:
-                buffer_linha += " " + l_strip
+                # Evita puxar emails, telefones, páginas ou dados de endereço para dentro do lote anterior
+                if not any(ign in l_strip.upper() for ign in ["@", "ROD GO", "RODOVIA", "CIADADE:", "CIDADE:", "UF:", "DATA:"]):
+                    buffer_linha += " " + l_strip
 
     if buffer_linha:
         linhas_completas.append(buffer_linha)

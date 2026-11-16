@@ -163,16 +163,19 @@ if uploaded_pdf is not None:
                     default=["LOTE", "QUANTIDADE", "SEXO", "CATEGORIA", "raca", "MESES", "KG", "LOCAL", "observacao"]
                 )
             with c_op2:
-                ajustar_plural_cols = st.checkbox(
-                    "Ajustar plural na Categoria (ex: 1 BEZERRO / 30 BEZERROS)",
+                ajustar_plurais_cols = st.checkbox(
+                    "Concordância de plural (ex: 30 MACHOS BEZERROS / 1 MACHO BEZERRO)",
                     value=True,
-                    help="Se marcado, usa BEZERROS quando qtde > 1 e BEZERRO quando qtde = 1."
+                    help="Usa plural quando quantidade > 1 e singular quando quantidade = 1."
                 )
 
             if colunas_selecionadas:
                 df_temp = df_lotes.copy()
-                if not ajustar_plural_cols and "CATEGORIA_SINGULAR" in df_temp.columns:
-                    df_temp["CATEGORIA"] = df_temp["CATEGORIA_SINGULAR"]
+                if not ajustar_plurais_cols:
+                    if "SEXO_SINGULAR" in df_temp.columns:
+                        df_temp["SEXO"] = df_temp["SEXO_SINGULAR"]
+                    if "CATEGORIA_SINGULAR" in df_temp.columns:
+                        df_temp["CATEGORIA"] = df_temp["CATEGORIA_SINGULAR"]
                 df_pronto = df_temp[colunas_selecionadas].copy()
                 colunas_finais = colunas_selecionadas
             else:
@@ -185,20 +188,16 @@ if uploaded_pdf is not None:
                 nome_coluna_junta = st.text_input("Nome da coluna agrupada na planilha:", value="SEXO")
                 incluir_ms = st.checkbox("Adicionar 'MS' após meses (ex: '9 MS')", value=True)
                 ajustar_plurais = st.checkbox(
-                    "Ajustar plural automaticamente (ex: 1 BEZERRO / 30 BEZERROS)",
+                    "Concordância de plural (ex: 30 MACHOS BEZERROS / 1 MACHO BEZERRO)",
                     value=True,
-                    help="Garante concordância correta com a quantidade de animais."
-                )
-                pluralizar_sexo_opt = st.checkbox(
-                    "Pluralizar sexo também (ex: 30 MACHOS / 1 MACHO)",
-                    value=False
+                    help="Garante concordância correta com a quantidade de animais de cada lote."
                 )
             with c_cfg2:
                 campos_juntar = st.multiselect(
                     "O que colocar dentro dessa coluna combinada?",
                     options=["QUANTIDADE", "SEXO", "CATEGORIA", "raca", "MESES", "LOCAL", "observacao"],
                     default=["QUANTIDADE", "SEXO", "CATEGORIA", "MESES"],
-                    help="Exemplo: Quantidade + Sexo + Categoria + Meses vira: '30 MACHO BEZERROS 9 MS'"
+                    help="Exemplo: Quantidade + Sexo + Categoria + Meses vira: '30 MACHOS BEZERROS 9 MS'"
                 )
 
             demais_colunas = st.multiselect(
@@ -210,22 +209,19 @@ if uploaded_pdf is not None:
             # Construir coluna combinada com concordância de plural
             def gerar_texto_combinado(row):
                 partes = []
-                qtde_val = int(row.get("QUANTIDADE_NUM", 1))
 
                 if "QUANTIDADE" in campos_juntar and str(row.get("QUANTIDADE", "")).strip():
                     partes.append(str(row["QUANTIDADE"]).strip())
 
-                if "SEXO" in campos_juntar and str(row.get("SEXO", "")).strip():
-                    sx_txt = str(row["SEXO"]).strip()
-                    if pluralizar_sexo_opt:
-                        sx_txt = pluralizar_sexo(sx_txt, qtde_val)
-                    partes.append(sx_txt)
+                if "SEXO" in campos_juntar:
+                    sx_txt = str(row.get("SEXO" if ajustar_plurais else "SEXO_SINGULAR", "")).strip()
+                    if sx_txt:
+                        partes.append(sx_txt)
 
-                if "CATEGORIA" in campos_juntar and str(row.get("CATEGORIA", "")).strip():
-                    cat_txt = str(row["CATEGORIA"]).strip()
-                    if ajustar_plurais and "CATEGORIA_SINGULAR" in row:
-                        cat_txt = pluralizar_categoria(row["CATEGORIA_SINGULAR"], qtde_val)
-                    partes.append(cat_txt)
+                if "CATEGORIA" in campos_juntar:
+                    cat_txt = str(row.get("CATEGORIA" if ajustar_plurais else "CATEGORIA_SINGULAR", "")).strip()
+                    if cat_txt:
+                        partes.append(cat_txt)
 
                 if "raca" in campos_juntar and str(row.get("raca", "")).strip():
                     partes.append(str(row["raca"]).strip())
