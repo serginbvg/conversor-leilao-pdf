@@ -9,7 +9,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-COLUNAS_PADRAO = ["LOTE", "QUANTIDADE", "SEXO", "raca", "MESES", "KG", "LOCAL", "observacao"]
+COLUNAS_PADRAO = ["LOTE", "QUANTIDADE", "SEXO", "CATEGORIA", "raca", "MESES", "KG", "LOCAL", "observacao"]
 
 def preparar_linhas_matriz(lotes: List[Dict[str, Any]], colunas: Optional[List[str]] = None) -> List[List[str]]:
     """

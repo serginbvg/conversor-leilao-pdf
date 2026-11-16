@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">🐂 Conversor de Leilão de Gado</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Extraia automaticamente os lotes de múltiplos formatos de PDF e sincronize os campos desejados com sua planilha do Google Drive</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Extraia lotes de múltiplos formatos de PDF, combine ou filtre campos e lance direto na sua planilha do Google Drive</div>', unsafe_allow_html=True)
 
 URL_WEBHOOK_PADRAO = "https://script.google.com/macros/s/AKfycbxhV6UyshMf9pOmQvT3daJUFMpPpWSfFlGIDWT-v04zS7QKddtvxizQCjkB0-zEThwcaw/exec"
 ID_PLANILHA_PADRAO = "16I1RSk_WBZAk9bvU4kbKjrv9slWMqL1lFbbSFaEl5PU"
@@ -131,26 +131,93 @@ if uploaded_pdf is not None:
         col4.metric("♀️ Fêmeas", f"{total_femeas}")
 
         st.markdown("---")
-        st.markdown("### 🎯 Seleção de Campos para Envio")
-        st.caption("Escolha quais colunas você quer enviar para a sua planilha do Google. Desmarque as colunas que não desejar incluir:")
+        st.markdown("### 🎯 Formato e Escolha de Campos para Envio")
 
-        colunas_selecionadas = st.multiselect(
-            "Campos selecionados:",
-            options=COLUNAS_PADRAO,
-            default=COLUNAS_PADRAO,
-            help="Arraste ou desmarque para personalizar a ordem ou remover colunas."
+        modo_envio = st.radio(
+            "Como deseja estruturar os dados para a sua planilha?",
+            [
+                "📋 Colunas Separadas (Padrão: Lote, Quantidade, Sexo, etc.)",
+                "🔀 Juntar Campos (Ex: LOTE e SEXO com Quantidade/Sexo/Meses agrupados)"
+            ],
+            index=0,
+            horizontal=True
         )
 
-        if not colunas_selecionadas:
-            st.warning("⚠️ Selecione pelo menos 1 coluna para visualizar e gravar na planilha.")
+        df_pronto = None
+        colunas_finais = []
+
+        if modo_envio.startswith("📋"):
+            st.caption("Escolha quais colunas você quer enviar para a planilha. Desmarque as que não desejar:")
+            colunas_selecionadas = st.multiselect(
+                "Colunas para envio:",
+                options=COLUNAS_PADRAO,
+                default=["LOTE", "QUANTIDADE", "SEXO", "CATEGORIA", "raca", "MESES", "KG", "LOCAL", "observacao"]
+            )
+            if colunas_selecionadas:
+                df_pronto = df_lotes[colunas_selecionadas].copy()
+                colunas_finais = colunas_selecionadas
+            else:
+                st.warning("⚠️ Selecione pelo menos 1 coluna para enviar.")
+
         else:
+            st.caption("Monte uma coluna agrupada juntando os campos que você precisa:")
+            c_cfg1, c_cfg2 = st.columns(2)
+            with c_cfg1:
+                nome_coluna_junta = st.text_input("Nome da coluna agrupada na planilha:", value="SEXO")
+                incluir_ms = st.checkbox("Adicionar 'MS' após meses (ex: '9 MS')", value=True)
+            with c_cfg2:
+                campos_juntar = st.multiselect(
+                    "O que colocar dentro dessa coluna combinada?",
+                    options=["QUANTIDADE", "SEXO", "CATEGORIA", "raca", "MESES", "LOCAL", "observacao"],
+                    default=["QUANTIDADE", "SEXO", "MESES"],
+                    help="Exemplo: Quantidade + Sexo + Meses vira: '30 MACHO 9 MS'"
+                )
+
+            demais_colunas = st.multiselect(
+                "Outras colunas a incluir na planilha:",
+                options=["LOTE", "LOCAL", "KG", "observacao"],
+                default=["LOTE"]
+            )
+
+            # Construir coluna combinada
+            def gerar_texto_combinado(row):
+                partes = []
+                if "QUANTIDADE" in campos_juntar and str(row.get("QUANTIDADE", "")).strip():
+                    partes.append(str(row["QUANTIDADE"]).strip())
+                if "SEXO" in campos_juntar and str(row.get("SEXO", "")).strip():
+                    partes.append(str(row["SEXO"]).strip())
+                if "CATEGORIA" in campos_juntar and str(row.get("CATEGORIA", "")).strip():
+                    partes.append(str(row["CATEGORIA"]).strip())
+                if "raca" in campos_juntar and str(row.get("raca", "")).strip():
+                    partes.append(str(row["raca"]).strip())
+                if "MESES" in campos_juntar and str(row.get("MESES", "")).strip():
+                    m = str(row["MESES"]).strip()
+                    partes.append(f"{m} MS" if incluir_ms and not m.upper().endswith("MS") else m)
+                if "LOCAL" in campos_juntar and str(row.get("LOCAL", "")).strip():
+                    partes.append(str(row["LOCAL"]).strip())
+                if "observacao" in campos_juntar and str(row.get("observacao", "")).strip():
+                    partes.append(str(row["observacao"]).strip())
+                return " ".join(partes)
+
+            df_temp = pd.DataFrame()
+            if "LOTE" in demais_colunas:
+                df_temp["LOTE"] = df_lotes["LOTE"]
+
+            df_temp[nome_coluna_junta] = df_lotes.apply(gerar_texto_combinado, axis=1)
+
+            for col in demais_colunas:
+                if col != "LOTE" and col in df_lotes.columns:
+                    df_temp[col] = df_lotes[col]
+
+            df_pronto = df_temp
+            colunas_finais = list(df_pronto.columns)
+
+        if df_pronto is not None and not df_pronto.empty:
             st.markdown("### 📋 Conferência dos Lotes a Enviar")
             st.caption("Você pode alterar qualquer informação diretamente na tabela antes de enviar:")
 
-            df_exibicao = df_lotes[colunas_selecionadas]
-
             df_editado = st.data_editor(
-                df_exibicao,
+                df_pronto,
                 use_container_width=True,
                 num_rows="dynamic",
                 key="editor_lotes"
@@ -172,8 +239,8 @@ if uploaded_pdf is not None:
                         else:
                             with st.spinner("Enviando dados diretamente para a planilha via Webhook..."):
                                 try:
-                                    res = gravar_via_webhook(webhook_url, dados_finais, colunas=colunas_selecionadas)
-                                    st.success(f"🎉 Sucesso! {len(dados_finais)} lotes foram sobrepostos na sua planilha com as colunas: {', '.join(colunas_selecionadas)}!")
+                                    res = gravar_via_webhook(webhook_url, dados_finais, colunas=colunas_finais)
+                                    st.success(f"🎉 Sucesso! {len(dados_finais)} lotes foram sobrepostos na sua planilha com as colunas: {', '.join(colunas_finais)}!")
                                     st.markdown(f"👉 [**Clique aqui para abrir sua Planilha Atualizada**](https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit)")
                                 except Exception as e:
                                     st.error(f"Erro ao enviar para o Webhook: {e}")
@@ -187,8 +254,8 @@ if uploaded_pdf is not None:
                                 try:
                                     cliente = obter_cliente_gspread(creds_source)
                                     gid_val = int(gid_input.strip()) if gid_input.strip().isdigit() else None
-                                    resultado = sobrepor_lotes_na_planilha(cliente, spreadsheet_id.strip(), dados_finais, gid=gid_val, colunas=colunas_selecionadas)
-                                    st.success(f"🎉 Sucesso! {resultado['total_linhas']} lotes foram sobrepostos com as colunas: {', '.join(colunas_selecionadas)}!")
+                                    resultado = sobrepor_lotes_na_planilha(cliente, spreadsheet_id.strip(), dados_finais, gid=gid_val, colunas=colunas_finais)
+                                    st.success(f"🎉 Sucesso! {resultado['total_linhas']} lotes foram sobrepostos com as colunas: {', '.join(colunas_finais)}!")
                                     link_planilha = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id.strip()}/edit"
                                     if gid_val:
                                         link_planilha += f"#gid={gid_val}"

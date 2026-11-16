@@ -95,21 +95,25 @@ def formatar_lote_para_planilha(
     descricao: str,
     obs: str = ""
 ) -> Dict[str, Any]:
-    decomp = parse_descricao(descricao, sx)
-    campo_sexo = decomp["categoria"] if decomp["categoria"] else (descricao.strip() if descricao else sx)
-
     sx_limpo = str(sx).strip().upper()
-    if sx_limpo.startswith("M"):
+    if sx_limpo in ["M", "MACHO"]:
+        sexo_extenso = "MACHO"
         sx_norm = "M"
-    elif sx_limpo.startswith("F"):
+    elif sx_limpo in ["F", "FEMEA", "FÊMEA"]:
+        sexo_extenso = "FÊMEA"
         sx_norm = "F"
     else:
+        sexo_extenso = sx_limpo
         sx_norm = sx_limpo
+
+    decomp = parse_descricao(descricao, sx_limpo)
+    categoria = decomp["categoria"] if decomp["categoria"] else ("MACHO" if sx_norm == "M" else "FÊMEA" if sx_norm == "F" else "")
 
     return {
         "LOTE": str(lote).strip(),
         "QUANTIDADE": int(qtde) if str(qtde).strip().isdigit() else str(qtde).strip(),
-        "SEXO": campo_sexo,
+        "SEXO": sexo_extenso,
+        "CATEGORIA": categoria,
         "raca": decomp["raca"],
         "MESES": decomp["meses"],
         "KG": "",
