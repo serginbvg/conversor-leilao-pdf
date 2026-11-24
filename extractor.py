@@ -252,12 +252,20 @@ def extrair_lotes_de_tabela_page(page) -> List[Dict[str, Any]]:
 def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     """
     Extrator multi-formato universal para leilões de gado via texto.
+    Suporta quebras de linha no nome do vendedor (ex: Lote 32 'FAZ NOSSA SENHORA DE \n APARECIDA').
     """
     linhas = text.split("\n")
     linhas_completas = []
     buffer_linha = ""
 
-    inicio_lote_re = re.compile(
+    # Identifica o início garantido de um lote: [Lote] [Quantidade] [Texto...]
+    inicio_novo_lote_re = re.compile(
+        r'^\s*([0-9]{1,4}[A-Za-z]?|SN)\s+(\d{1,4})\s+(.+)$',
+        re.IGNORECASE
+    )
+
+    # Identifica a estrutura completa após juntar linhas quebradas
+    lote_completo_re = re.compile(
         r'^\s*([0-9]{1,4}[A-Za-z]?|SN)\s+(\d{1,4})\s+(.+?)\s+(MACHO|FÊMEA|FEMEA|[MF])(?:\s+(.*))?$',
         re.IGNORECASE
     )
@@ -273,7 +281,7 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
             continue
 
         # Se encontrou o totalizador da página ou rodapé final, encerra a leitura desta página
-        if any(fim in l_strip.upper() for fim in ["TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "COMISSÃO DE COMPRA", "COMISSAO DE COMPRA"]):
+        if any(fim in l_strip.upper() for fim in ["TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "TOTAL GERAL", "COMISSÃO", "COMISSAO"]):
             if buffer_linha:
                 linhas_completas.append(buffer_linha)
                 buffer_linha = ""
@@ -282,8 +290,8 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
         if any(ign in l_strip.upper() for ign in palavras_ignorar):
             continue
 
-        m = inicio_lote_re.match(l_strip)
-        if m:
+        # Se a linha começa com um novo lote (Número/SN + Quantidade)
+        if inicio_novo_lote_re.match(l_strip):
             if buffer_linha:
                 linhas_completas.append(buffer_linha)
             buffer_linha = l_strip
@@ -297,7 +305,7 @@ def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
 
     lotes = []
     for linha in linhas_completas:
-        m = inicio_lote_re.match(linha)
+        m = lote_completo_re.match(linha)
         if m:
             lote = m.group(1).strip()
             qtde = m.group(2).strip()
