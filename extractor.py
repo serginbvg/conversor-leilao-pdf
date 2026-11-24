@@ -172,82 +172,87 @@ def formatar_lote_para_planilha(
         "DESCRICAO_ORIGINAL": str(descricao).strip()
     }
 
-def extrair_lotes_de_tabela_page(page) -> List[Dict[str, Any]]:
+def extrair_lotes_de_tabela_page(page, col_map_anterior: Optional[Dict[str, int]] = None):
     """
     Extrai os lotes a partir da estrutura nativa de tabela com bordas do pdfplumber.
-    Isola 100% as colunas sem risco de misturar texto entre células.
+    Suporta cabeçalho em caixa separada da grade de dados (ex: São Germano Leilões)
+    e células mescladas de rodapé (removendo subcolunas None).
+    Retorna (lotes_da_pagina, col_map_atualizado).
     """
     lotes = []
+    col_map = col_map_anterior
     try:
         tables = page.extract_tables()
         if not tables:
-            return []
+            return [], col_map
 
         for table in tables:
-            if not table or len(table) < 2:
+            if not table:
                 continue
 
-            header_idx = -1
-            col_lote = -1
-            col_qtde = -1
-            col_vend = -1
-            col_sx = -1
-            col_desc = -1
-            col_obs = -1
-
-            for r_idx, row in enumerate(table):
-                if not row:
+            for row in table:
+                if not row or not any(row):
                     continue
-                row_str = " ".join([str(c).upper() for c in row if c])
-                if "LOTE" in row_str and any(q in row_str for q in ["QTDE", "QUANTIDADE", "QTE", "QUANT"]):
-                    header_idx = r_idx
-                    for idx, c in enumerate(row):
-                        c_str = str(c).upper().strip() if c else ""
-                        if "LOTE" in c_str:
-                            col_lote = idx
-                        elif any(q in c_str for q in ["QTDE", "QUANTIDADE", "QTE", "QUANT"]):
-                            col_qtde = idx
-                        elif any(v in c_str for v in ["VENDEDOR", "FAZENDA", "LOCAL", "PROPRIEDADE"]):
-                            col_vend = idx
-                        elif "SEXO" in c_str or "SX" in c_str:
-                            col_sx = idx
-                        elif "DESC" in c_str:
-                            col_desc = idx
-                        elif "OBS" in c_str:
-                            col_obs = idx
-                    break
 
-            if header_idx != -1 and col_lote != -1 and col_qtde != -1:
-                for row in table[header_idx + 1:]:
-                    if not row or not any(row):
-                        continue
+                # Remove None (subcélulas de mesclagem geradas pelo pdfplumber) e limpa espaços/quebras
+                clean_row = [re.sub(r"\s+", " ", str(c)).strip() for c in row if c is not None]
+                if not clean_row or not any(clean_row):
+                    continue
 
-                    # Ignora linhas de totalizadores (ex: 54 1684 Total Macho: 1684...) ou rodapés
-                    row_full_str = " ".join([str(c).upper() for c in row if c])
-                    if any(fim in row_full_str for fim in [
-                        "TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "TOTAL GERAL",
-                        "COMISSÃO", "COMISSAO", "CONDIÇÃO DE PAGTO", "CONDICAO DE PAGTO"
-                    ]):
-                        continue
+                row_upper = " ".join(clean_row).upper()
 
-                    lote_val = str(row[col_lote]).replace("\n", " ").strip() if col_lote < len(row) and row[col_lote] else ""
-                    if not lote_val or any(fim in lote_val.upper() for fim in ["TOTAL", "COMISS", "CONDIC", "PAG."]):
-                        continue
+                # Detecta linha de cabeçalho (mesmo que venha isolada em uma tabela de 1 linha)
+                if "LOTE" in row_upper and any(q in row_upper for q in ["QTDE", "QUANTIDADE", "QTE", "QUANT", "CAB"]):
+                    cmap = {"lote": -1, "qtde": -1, "vend": -1, "sx": -1, "desc": -1, "obs": -1}
+                    for idx, c_str in enumerate(clean_row):
+                        cu = c_str.upper()
+                        if "LOTE" in cu:
+                            cmap["lote"] = idx
+                        elif any(q in cu for q in ["QTDE", "QUANTIDADE", "QTE", "QUANT", "CAB"]):
+                            cmap["qtde"] = idx
+                        elif any(v in cu for v in ["VENDEDOR", "FAZENDA", "LOCAL", "PROPRIEDADE", "ORIGEM"]):
+                            cmap["vend"] = idx
+                        elif "SEXO" in cu or cu == "SX":
+                            cmap["sx"] = idx
+                        elif "DESC" in cu or "CATEGORIA" in cu or "ANIMAL" in cu:
+                            cmap["desc"] = idx
+                        elif "OBS" in cu:
+                            cmap["obs"] = idx
+                    if cmap["lote"] != -1 and cmap["qtde"] != -1:
+                        col_map = cmap
+                    continue
 
-                    qtde_val = str(row[col_qtde]).replace("\n", " ").strip() if col_qtde < len(row) and row[col_qtde] else ""
-                    vend_val = str(row[col_vend]).replace("\n", " ").strip() if col_vend != -1 and col_vend < len(row) and row[col_vend] else ""
-                    sx_val = str(row[col_sx]).replace("\n", " ").strip() if col_sx != -1 and col_sx < len(row) and row[col_sx] else ""
-                    desc_val = str(row[col_desc]).replace("\n", " ").strip() if col_desc != -1 and col_desc < len(row) and row[col_desc] else ""
-                    obs_val = str(row[col_obs]).replace("\n", " ").strip() if col_obs != -1 and col_obs < len(row) and row[col_obs] else ""
+                # Ignora linhas de totalizadores ou rodapés
+                if any(fim in row_upper for fim in [
+                    "TOTAL MACHO", "TOTAL FÊMEA", "TOTAL FEMEA", "TOTAL GERAL",
+                    "COMISSÃO", "COMISSAO", "CONDIÇÃO DE PAGTO", "CONDICAO DE PAGTO",
+                    "PAG.:", "RELAÇÃO DOS LOTES", "RELACAO DOS LOTES"
+                ]):
+                    continue
 
-                    # Se lote válido (numérico ou alfanumérico como 80A, 01, SN)
-                    if re.match(r'^(?:[0-9]{1,4}[A-Za-z]?|SN)$', lote_val, re.IGNORECASE):
-                        lote_formatado = formatar_lote_para_planilha(lote_val, qtde_val, vend_val, sx_val, desc_val, obs_val)
+                if col_map is not None:
+                    def get_col(key: str) -> str:
+                        pos = col_map.get(key, -1)
+                        return clean_row[pos] if pos != -1 and pos < len(clean_row) else ""
+
+                    lote_val = get_col("lote")
+                    qtde_val = get_col("qtde")
+
+                    # Se lote válido (numérico ou alfanumérico como 80A, 01, 018, SN) e quantidade numérica
+                    if re.match(r"^(?:[0-9]{1,4}[A-Za-z]?|SN)$", lote_val, re.IGNORECASE) and qtde_val.isdigit():
+                        lote_formatado = formatar_lote_para_planilha(
+                            lote_val,
+                            qtde_val,
+                            get_col("vend"),
+                            get_col("sx"),
+                            get_col("desc"),
+                            get_col("obs"),
+                        )
                         lotes.append(lote_formatado)
     except Exception:
-        return []
+        return [], col_map
 
-    return lotes
+    return lotes, col_map
 
 def extrair_lotes_de_texto(text: str) -> List[Dict[str, Any]]:
     """
@@ -342,9 +347,10 @@ def extrair_lotes_de_pdf(pdf_path_or_file) -> List[Dict[str, Any]]:
     2. Se não identificar tabela ou colunas, usa o parser de texto universal.
     """
     lotes_extraidos = []
+    col_map = None
     with pdfplumber.open(pdf_path_or_file) as pdf:
         for page in pdf.pages:
-            lotes_tabela = extrair_lotes_de_tabela_page(page)
+            lotes_tabela, col_map = extrair_lotes_de_tabela_page(page, col_map)
             if lotes_tabela and len(lotes_tabela) > 0:
                 lotes_extraidos.extend(lotes_tabela)
             else:
